@@ -41,27 +41,51 @@ func TestWindowsCachePolicy_accepts_trusted_write_and_untrusted_read_or_deny(t *
 	}
 }
 
-func TestWindowsCachePolicy_rejects_untrusted_write_including_inherited_aces(t *testing.T) {
+func TestWindowsCachePolicy_accepts_process_token_default_owner(t *testing.T) {
+	// Given
+	user := currentWindowsUser(t)
+	defaultOwner := wellKnownWindowsSID(t, windows.WinBuiltinAdministratorsSid)
+	dacl := windowsACL(t,
+		windowsAccess(windowsAccessSpec{defaultOwner, windows.GENERIC_ALL, windows.GRANT_ACCESS, windows.NO_INHERITANCE}),
+		windowsAccess(windowsAccessSpec{user, windows.GENERIC_WRITE, windows.GRANT_ACCESS, windows.NO_INHERITANCE}),
+	)
+
+	// When
+	err := validateWindowsPolicy(windowsPolicyInput{
+		owner: defaultOwner, dacl: dacl, user: user, defaultOwner: defaultOwner, directory: true,
+	})
+
+	// Then
+	if err != nil {
+		t.Fatalf("policy error = %v, want nil", err)
+	}
+}
+
+func TestWindowsCachePolicy_rejects_untrusted_write_masks(t *testing.T) {
 	// Given
 	owner := currentWindowsUser(t)
 	everyone := wellKnownWindowsSID(t, windows.WinWorldSid)
 	cases := []struct {
 		name        string
 		permissions windows.ACCESS_MASK
-		inheritance uint32
 		directory   bool
 	}{
-		{"write data", windows.FILE_WRITE_DATA, windows.NO_INHERITANCE, false},
-		{"delete", windows.DELETE, windows.NO_INHERITANCE, false},
-		{"write DACL", windows.WRITE_DAC, windows.NO_INHERITANCE, false},
-		{"inherited write", windows.FILE_APPEND_DATA, windows.INHERITED_ACCESS_ENTRY, false},
-		{"delete child", windowsFileDeleteChild, windows.INHERITED_ACCESS_ENTRY, true},
+		{"write data", windows.FILE_WRITE_DATA, false},
+		{"append data", windows.FILE_APPEND_DATA, false},
+		{"delete", windows.DELETE, false},
+		{"write DACL", windows.WRITE_DAC, false},
+		{"delete child", windowsFileDeleteChild, true},
 	}
 
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			// When
-			entry := windowsAccess(windowsAccessSpec{everyone, test.permissions, windows.GRANT_ACCESS, test.inheritance})
+			entry := windowsAccess(windowsAccessSpec{
+				sid:         everyone,
+				permissions: test.permissions,
+				mode:        windows.GRANT_ACCESS,
+				inheritance: windows.NO_INHERITANCE,
+			})
 			err := validateWindowsPolicy(windowsPolicyInput{
 				owner: owner, dacl: windowsACL(t, entry), user: owner, directory: test.directory,
 			})
