@@ -1,0 +1,6 @@
+cases = 256
+max_local_rejects = 65536
+max_global_rejects = 1024
+max_shrink_iters = 1024
+max_shrink_time = 60000
+verbose = 0

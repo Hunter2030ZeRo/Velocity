@@ -1,0 +1,37 @@
+version: '3'
+
+tasks:
+  default:
+    deps: [fmt, test]
+
+  fmt:
+    desc: Format Go and Rust sources
+    cmds:
+      - gofumpt -w .
+      - goimports -w -local "$(go list -m)" .
+      - cargo fmt --all
+
+  test:
+    desc: Run Go race tests and Rust tests
+    cmds:
+      - go test -race -shuffle=on -count=1 ./...
+      - cargo test --workspace
+
+  lint:
+    desc: Run strict language linters
+    cmds:
+      - golangci-lint run --timeout 5m ./...
+      - nilaway ./...
+      - cargo clippy --all-targets --all-features --workspace -- -D warnings
+
+  build:
+    desc: Build both Velocity executables
+    cmds:
+      - mkdir -p bin
+      - cargo build --release --package velocity-resolver
+      - cp target/release/velocity-resolver bin/velocity-resolver
+      - go build -trimpath -ldflags="-s -w" -o bin/velocity ./cmd/velocity
+
+  ci:
+    desc: Run the complete local CI gate
+    deps: [lint, test, build]

@@ -1,0 +1,71 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.24'
+          cache: true
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - name: Install Go quality tools
+        run: |
+          go install github.com/golangci/golangci-lint/cmd/golangci-lint@v2.12.2
+          go install go.uber.org/nilaway/cmd/nilaway@v0.0.0-20260807171618-6c75dfa2eadb
+      - name: Go lint
+        run: golangci-lint run --timeout 5m ./...
+      - name: Nilaway
+        run: nilaway ./...
+      - name: Go tests
+        run: go test -race -shuffle=on -count=1 ./...
+      - name: POSIX installer tests
+        run: |
+          sh tests/installers/install_sh_test.sh
+          sh tests/installers/install_sh_limits_test.sh
+          sh tests/installers/install_sh_recovery_test.sh
+      - name: Rust format
+        run: cargo fmt --all -- --check
+      - name: Rust lint
+        run: cargo clippy --all-targets --all-features --workspace -- -D warnings
+      - name: Rust tests
+        run: cargo test --workspace
+      - name: Build
+        run: |
+          cargo build --release --package velocity-resolver
+          go build -trimpath ./cmd/velocity
+
+  windows-cache:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.24'
+          cache: true
+      - name: Windows cache ACL tests
+        run: go test -race -shuffle=on -count=1 ./internal/download
+      - name: PowerShell installer tests
+        shell: pwsh
+        run: |
+          ./tests/installers/install_ps1_test.ps1
+          ./tests/installers/install_ps1_http_test.ps1
+          ./tests/installers/install_ps1_recovery_test.ps1
+      - name: Windows PowerShell 5.1 installer compatibility
+        shell: powershell
+        run: |
+          ./tests/installers/install_ps1_test.ps1
+          ./tests/installers/install_ps1_http_test.ps1
+          ./tests/installers/install_ps1_recovery_test.ps1

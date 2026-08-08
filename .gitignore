@@ -1,0 +1,17 @@
+bin/
+target/
+coverage.out
+coverage.html
+*.test
+*.prof
+*.tmp
+
+.idea/
+.vscode/
+*.swp
+
+.env
+.env.local
+
+*.pem
+*.key
