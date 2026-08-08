@@ -26,11 +26,12 @@ const (
 )
 
 type downloadProgress struct {
-	writer     io.Writer
+	writer io.Writer
+	err    error
+
 	mu         sync.Mutex
 	last       download.Progress
 	lastBucket int64
-	err        error
 	drawn      bool
 	lineOpen   bool
 }
