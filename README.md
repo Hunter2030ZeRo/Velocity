@@ -62,8 +62,8 @@ sh install.sh --version v0.1.0
 .\install.ps1 -Version v0.1.0
 ```
 
-Run `install.ps1` from the repository layout so its
-`scripts/installers/Velocity.*.ps1` helpers remain beside it.
+Both installers are self-contained repository artifacts: either file can be
+downloaded or copied alone without the rest of the repository.
 
 The POSIX installer supports x86-64/AArch64 Linux GNU and musl targets and
 defaults to `$HOME/.local/bin`. The PowerShell installer supports x86-64 and

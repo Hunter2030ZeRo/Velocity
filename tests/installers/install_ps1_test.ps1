@@ -37,13 +37,16 @@ function New-Release {
 }
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
-$installer = Join-Path $repoRoot 'install.ps1'
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ("velocity-installer-{0}" -f [Guid]::NewGuid())
+$installer = Join-Path $testRoot 'install.ps1'
 $target = 'x86_64-pc-windows-msvc'
 $asset = "velocity-$target.zip"
 $originalOS = $env:OS
 
 try {
+    # Given: only the top-level installer copied outside the repository layout.
+    New-Item -ItemType Directory -Path $testRoot | Out-Null
+    Copy-Item -LiteralPath (Join-Path $repoRoot 'install.ps1') -Destination $installer
     $env:OS = 'Windows_NT'
     $payload = Join-Path $testRoot 'payload'
     $release = Join-Path $testRoot 'release'

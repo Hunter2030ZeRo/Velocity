@@ -1,3 +1,4 @@
+# allow: SIZE_OK - standalone distribution artifact with security helpers embedded.
 param(
     [string] $Version,
     [string] $Target,
@@ -11,8 +12,289 @@ $ProgressPreference = 'SilentlyContinue'
 Set-StrictMode -Version Latest
 Add-Type -AssemblyName System.Net.Http
 $script:VelocityInstallerHttpHandler = $null
-. (Join-Path $PSScriptRoot 'scripts/installers/Velocity.Http.ps1')
-. (Join-Path $PSScriptRoot 'scripts/installers/Velocity.Archive.ps1')
+
+function Resolve-HttpsRedirect {
+    param(
+        [Parameter(Mandatory)] [Uri] $Current,
+        [Uri] $Location
+    )
+
+    if ($null -eq $Location) { throw 'HTTPS redirect response omitted Location' }
+    $next = [Uri]::new($Current, $Location)
+    if (-not $next.IsAbsoluteUri -or $next.Scheme -cne 'https') {
+        throw "HTTPS redirect attempted an insecure destination: $next"
+    }
+    return $next
+}
+
+function Save-HttpsFile {
+    param(
+        [Parameter(Mandatory)] [Uri] $Uri,
+        [Parameter(Mandatory)] [string] $Destination,
+        [Parameter(Mandatory)] [long] $MaximumBytes,
+        [ValidateScript({ $_ -gt [TimeSpan]::Zero })]
+        [TimeSpan] $Timeout = ([TimeSpan]::FromMinutes(5))
+    )
+
+    $handler = $script:VelocityInstallerHttpHandler
+    $ownsHandler = $null -eq $handler
+    if ($ownsHandler) {
+        $handler = [Net.Http.HttpClientHandler]::new()
+    }
+    if ($handler -is [Net.Http.HttpClientHandler]) { $handler.AllowAutoRedirect = $false }
+    $client = [Net.Http.HttpClient]::new($handler, $false)
+    $deadline = [Threading.CancellationTokenSource]::new()
+    $deadline.CancelAfter($Timeout)
+    $deadlineTask = [Threading.Tasks.Task]::Delay(
+        [Threading.Timeout]::Infinite,
+        $deadline.Token
+    )
+    try {
+        $current = $Uri
+        $redirects = 0
+        while ($true) {
+            if (-not $current.IsAbsoluteUri -or $current.Scheme -cne 'https') {
+                throw "Release URL must use HTTPS: $current"
+            }
+            $request = [Net.Http.HttpRequestMessage]::new([Net.Http.HttpMethod]::Get, $current)
+            $response = $null
+            try {
+                $response = $client.SendAsync(
+                    $request,
+                    [Net.Http.HttpCompletionOption]::ResponseHeadersRead,
+                    $deadline.Token
+                ).GetAwaiter().GetResult()
+                if ([int] $response.StatusCode -in @(301, 302, 303, 307, 308)) {
+                    if ($redirects -ge 10) { throw 'Release download exceeded 10 redirects' }
+                    $current = Resolve-HttpsRedirect -Current $current -Location $response.Headers.Location
+                    $redirects++
+                    continue
+                }
+                [void] $response.EnsureSuccessStatusCode()
+                if ($response.Content.Headers.ContentLength -gt $MaximumBytes) {
+                    throw "Release file exceeds $MaximumBytes bytes"
+                }
+                $bodyStream = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+                $output = [IO.File]::Create($Destination)
+                $complete = $false
+                try {
+                    $buffer = [byte[]]::new(65536)
+                    $total = [long] 0
+                    while ($true) {
+                        $readTask = $bodyStream.ReadAsync($buffer, 0, $buffer.Length, $deadline.Token)
+                        $winner = [Threading.Tasks.Task]::WhenAny(
+                            [Threading.Tasks.Task[]] @($readTask, $deadlineTask)
+                        ).GetAwaiter().GetResult()
+                        if ([object]::ReferenceEquals($winner, $deadlineTask) -or
+                            $deadline.IsCancellationRequested) {
+                            $bodyStream.Dispose()
+                            $response.Dispose()
+                            throw [TimeoutException]::new('Release download exceeded its absolute deadline')
+                        }
+                        $read = $readTask.GetAwaiter().GetResult()
+                        if ($read -le 0) { break }
+                        $total += $read
+                        if ($total -gt $MaximumBytes) { throw "Release file exceeds $MaximumBytes bytes" }
+                        $output.Write($buffer, 0, $read)
+                    }
+                    $complete = $true
+                }
+                finally {
+                    $output.Dispose()
+                    $bodyStream.Dispose()
+                    if (-not $complete -and [IO.File]::Exists($Destination)) { [IO.File]::Delete($Destination) }
+                }
+                return
+            }
+            finally {
+                if ($null -ne $response) { $response.Dispose() }
+                $request.Dispose()
+            }
+        }
+    }
+    finally {
+        $deadline.Cancel()
+        $deadline.Dispose()
+        $client.Dispose()
+        if ($ownsHandler) { $handler.Dispose() }
+    }
+}
+
+function Copy-ReleaseFile {
+    param(
+        [Parameter(Mandatory)] [string] $Base,
+        [Parameter(Mandatory)] [string] $Name,
+        [Parameter(Mandatory)] [string] $Destination
+    )
+
+    $maximumBytes = if ($Name -ceq 'SHA256SUMS') { 1MB } else { 256MB }
+    if ($Base.StartsWith('\\') -or $Base.StartsWith('//')) {
+        throw 'Local release directory must not be a UNC or device path'
+    }
+    if ([IO.Path]::IsPathRooted($Base) -and [IO.Directory]::Exists($Base)) {
+        $baseItem = Get-Item -LiteralPath $Base -Force
+        if ($baseItem.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            throw 'Local release directory must not be a reparse point'
+        }
+        $source = Join-Path $Base $Name
+        $sourceItem = Get-Item -LiteralPath $source -Force
+        if ($sourceItem.PSIsContainer -or ($sourceItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+            $sourceItem.Length -gt $maximumBytes) {
+            throw "Release file is invalid or exceeds $maximumBytes bytes: $source"
+        }
+        $sourceStream = [IO.File]::Open($source, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+        $output = [IO.File]::Create($Destination)
+        $complete = $false
+        try {
+            $buffer = [byte[]]::new(65536)
+            $total = [long] 0
+            while (($read = $sourceStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+                $total += $read
+                if ($total -gt $maximumBytes) { throw "Release file exceeds $maximumBytes bytes: $source" }
+                $output.Write($buffer, 0, $read)
+            }
+            $complete = $true
+        }
+        finally {
+            $output.Dispose()
+            $sourceStream.Dispose()
+            if (-not $complete -and [IO.File]::Exists($Destination)) { [IO.File]::Delete($Destination) }
+        }
+        return
+    }
+
+    $baseUri = [Uri] $Base
+    if (-not $baseUri.IsAbsoluteUri -or $baseUri.Scheme -cne 'https' -or
+        $baseUri.UserInfo -or $baseUri.Query -or $baseUri.Fragment) {
+        throw 'Release source must be an HTTPS directory URL or an explicit local directory'
+    }
+    $source = [Uri]::new($baseUri.AbsoluteUri.TrimEnd('/') + '/' + [Uri]::EscapeDataString($Name))
+    Save-HttpsFile -Uri $source -Destination $Destination -MaximumBytes $maximumBytes
+}
+
+function Get-ExpectedHash {
+    param(
+        [Parameter(Mandatory)] [string] $Manifest,
+        [Parameter(Mandatory)] [string] $AssetName
+    )
+
+    $assetPattern = [Regex]::Escape($AssetName)
+    $pattern = "^(?<Hash>[0-9A-Fa-f]{64})[ `t]+\*?$assetPattern$"
+    $expected = $null
+    foreach ($line in [IO.File]::ReadLines($Manifest)) {
+        $match = [Regex]::Match($line, $pattern)
+        if (-not $match.Success) { continue }
+        if ($null -ne $expected) { throw "SHA256SUMS contains duplicate entries for $AssetName" }
+        $expected = $match.Groups['Hash'].Value.ToLowerInvariant()
+    }
+    if ($null -eq $expected) { throw "SHA256SUMS does not contain a checksum for $AssetName" }
+    return $expected
+}
+
+function Assert-SafeZipDirectory {
+    param([Parameter(Mandatory)] [string] $Archive)
+
+    $stream = [IO.File]::Open($Archive, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    try {
+        if ($stream.Length -lt 22) { throw 'Release ZIP is truncated' }
+        [void] $stream.Seek(-22, [IO.SeekOrigin]::End)
+        $reader = [IO.BinaryReader]::new($stream, [Text.Encoding]::UTF8, $true)
+        try {
+            $signature = $reader.ReadUInt32()
+            $disk = $reader.ReadUInt16()
+            $directoryDisk = $reader.ReadUInt16()
+            $diskEntries = $reader.ReadUInt16()
+            $totalEntries = $reader.ReadUInt16()
+            $directorySize = $reader.ReadUInt32()
+            $directoryOffset = $reader.ReadUInt32()
+            $commentLength = $reader.ReadUInt16()
+        }
+        finally {
+            $reader.Dispose()
+        }
+        if ($signature -ne 0x06054b50 -or $disk -ne 0 -or $directoryDisk -ne 0 -or
+            $diskEntries -ne 2 -or $totalEntries -ne 2 -or $commentLength -ne 0) {
+            throw 'Release ZIP must be single-disk, non-ZIP64, comment-free, and contain two entries'
+        }
+        if ($directorySize -gt 1MB -or ([long] $directoryOffset + $directorySize) -ne ($stream.Length - 22)) {
+            throw 'Release ZIP central directory is invalid or exceeds 1 MiB'
+        }
+    }
+    finally {
+        $stream.Dispose()
+    }
+}
+
+function Expand-VelocityArchive {
+    param(
+        [Parameter(Mandatory)] [string] $Archive,
+        [Parameter(Mandatory)] [string] $Destination
+    )
+
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    Assert-SafeZipDirectory -Archive $Archive
+    $expectedNames = @('velocity.exe', 'velocity-resolver.exe')
+    $zip = [IO.Compression.ZipFile]::OpenRead($Archive)
+    try {
+        $entries = @($zip.Entries)
+        if ($entries.Count -ne $expectedNames.Count) { throw 'Release ZIP must contain exactly two executables' }
+        $declaredExpandedBytes = [long] 0
+        $actualExpandedBytes = [long] 0
+        foreach ($expectedName in $expectedNames) {
+            $matches = @($entries | Where-Object { $_.FullName -ceq $expectedName })
+            if ($matches.Count -ne 1 -or $matches[0].Length -le 0) {
+                throw "Release ZIP must contain $expectedName exactly once as a non-empty file"
+            }
+            if ($matches[0].Length -gt 128MB) { throw "Release ZIP entry exceeds 128 MiB: $expectedName" }
+            $declaredExpandedBytes += $matches[0].Length
+            if ($declaredExpandedBytes -gt 256MB) { throw 'Release ZIP expands beyond 256 MiB' }
+            $unixType = (($matches[0].ExternalAttributes -shr 16) -band 0xF000)
+            if ($unixType -eq 0xA000) { throw "Release ZIP entry must not be a symbolic link: $expectedName" }
+            $entryStream = $matches[0].Open()
+            $destinationPath = Join-Path $Destination $expectedName
+            $output = [IO.File]::Open($destinationPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write)
+            $complete = $false
+            try {
+                $buffer = [byte[]]::new(65536)
+                $entryBytes = [long] 0
+                while (($read = $entryStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+                    $entryBytes += $read
+                    if ($entryBytes -gt 128MB -or ($actualExpandedBytes + $entryBytes) -gt 256MB) {
+                        throw "Release ZIP expansion limit exceeded: $expectedName"
+                    }
+                    $output.Write($buffer, 0, $read)
+                }
+                $actualExpandedBytes += $entryBytes
+                $complete = $true
+            }
+            finally {
+                $output.Dispose()
+                $entryStream.Dispose()
+                if (-not $complete -and [IO.File]::Exists($destinationPath)) { [IO.File]::Delete($destinationPath) }
+            }
+        }
+    }
+    finally {
+        $zip.Dispose()
+    }
+}
+
+function Restore-PublishedPair {
+    param(
+        [Parameter(Mandatory)] [hashtable] $PreviousFiles,
+        [Parameter(Mandatory)] [string] $InstallDir
+    )
+
+    foreach ($name in @('velocity.exe', 'velocity-resolver.exe')) {
+        $destination = Join-Path $InstallDir $name
+        if ($PreviousFiles.ContainsKey($name)) {
+            Copy-Item -LiteralPath $PreviousFiles[$name] -Destination $destination -Force
+        }
+        elseif (Test-Path -LiteralPath $destination) {
+            Remove-Item -LiteralPath $destination -Force
+        }
+    }
+}
 
 function Get-HostTarget {
     $architecture = if ($env:PROCESSOR_ARCHITEW6432) {

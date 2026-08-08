@@ -2,13 +2,17 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
-$installer = Join-Path $repoRoot 'install.ps1'
-try { . $installer } catch { }
-if ($null -eq (Get-Command Save-HttpsFile -ErrorAction SilentlyContinue)) {
-    throw 'manual HTTPS downloader is not available'
-}
+$testRoot = Join-Path ([IO.Path]::GetTempPath()) ("velocity-http-{0}" -f [Guid]::NewGuid())
+New-Item -ItemType Directory -Path $testRoot | Out-Null
+try {
+    $installer = Join-Path $testRoot 'install.ps1'
+    Copy-Item -LiteralPath (Join-Path $repoRoot 'install.ps1') -Destination $installer
+    try { . $installer } catch { }
+    if ($null -eq (Get-Command Save-HttpsFile -ErrorAction SilentlyContinue)) {
+        throw 'manual HTTPS downloader is not available'
+    }
 
-Add-Type -TypeDefinition @'
+    Add-Type -TypeDefinition @'
 using System;
 using System.Collections.Generic;
 using System.Net;
@@ -120,9 +124,6 @@ public sealed class InstallerDeadlineHandler : HttpMessageHandler
 }
 '@
 
-$testRoot = Join-Path ([IO.Path]::GetTempPath()) ("velocity-http-{0}" -f [Guid]::NewGuid())
-New-Item -ItemType Directory -Path $testRoot | Out-Null
-try {
     # An HTTPS-to-HTTP redirect must fail before dispatching the second request.
     $downgradeHandler = [InstallerRedirectHandler]::new($true)
     $script:VelocityInstallerHttpHandler = $downgradeHandler

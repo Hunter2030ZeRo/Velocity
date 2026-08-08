@@ -47,9 +47,11 @@ make_release() {
 
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH='' cd -- "$script_dir/../.." && pwd)
-installer=$repo_root/install.sh
 test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT HUP INT TERM
+installer=$test_root/install.sh
+cp "$repo_root/install.sh" "$installer"
+cd "$test_root"
 
 target=x86_64-unknown-linux-gnu
 asset=velocity-$target.tar.gz

@@ -33,6 +33,7 @@ jobs:
         run: go test -race -shuffle=on -count=1 ./...
       - name: POSIX installer tests
         run: |
+          sh tests/installers/install_standalone_test.sh
           sh tests/installers/install_sh_test.sh
           sh tests/installers/install_sh_limits_test.sh
           sh tests/installers/install_sh_recovery_test.sh
