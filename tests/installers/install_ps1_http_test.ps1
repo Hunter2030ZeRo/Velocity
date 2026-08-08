@@ -12,7 +12,8 @@ try {
         throw 'manual HTTPS downloader is not available'
     }
 
-    Add-Type -TypeDefinition @'
+    Add-Type -AssemblyName System.Net.Http
+    Add-Type -ReferencedAssemblies ([System.Net.Http.HttpMessageHandler].Assembly.Location) -TypeDefinition @'
 using System;
 using System.Collections.Generic;
 using System.Net;
