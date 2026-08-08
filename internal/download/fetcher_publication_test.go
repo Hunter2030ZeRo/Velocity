@@ -76,8 +76,11 @@ func TestFetcher_FetchAll_failed_peer_does_not_remove_successful_batch_entry(t *
 		t.Fatalf("successful cache entry: %v", statErr)
 		return
 	}
-	if !info.Mode().IsRegular() || info.Mode().Perm()&0o022 != 0 {
-		t.Fatalf("successful cache entry mode = %v, want private regular file", info.Mode())
+	if !info.Mode().IsRegular() {
+		t.Fatalf("successful cache entry mode = %v, want regular file", info.Mode())
+	}
+	if validationErr := validateCacheEntry(path, info); validationErr != nil {
+		t.Fatalf("successful cache entry is unsafe: %v", validationErr)
 	}
 	content, readErr := os.ReadFile(path)
 	mustNoError(t, readErr)
