@@ -13,9 +13,10 @@ import (
 )
 
 type fetchTransaction struct {
-	created   map[string]os.FileInfo
-	prefix    string
-	progress  *progressTracker
+	created  map[string]os.FileInfo
+	progress *progressTracker
+	prefix   string
+
 	mu        sync.Mutex
 	remaining atomic.Int64
 }
