@@ -226,6 +226,9 @@ func TestFetcher_FetchAll_reports_indeterminate_progress_for_unknown_length(t *t
 		}
 		return false
 	})
+	if len(snapshots) == 0 {
+		t.Fatal("progress snapshots are empty")
+	}
 	last := snapshots[len(snapshots)-1]
 	require.Equal(t, int64(len(content)), last.DownloadedBytes)
 	require.Equal(t, int64(len(content)), last.TotalBytes)
@@ -263,6 +266,9 @@ func TestFetcher_FetchAll_reconciles_progress_when_content_length_is_understated
 		}
 		return false
 	})
+	if len(snapshots) == 0 {
+		t.Fatal("progress snapshots are empty")
+	}
 	last := snapshots[len(snapshots)-1]
 	require.Equal(t, last.DownloadedBytes, last.TotalBytes)
 	require.Equal(t, int64(len(content)), last.TotalBytes)
