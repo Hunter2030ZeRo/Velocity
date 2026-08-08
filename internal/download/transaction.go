@@ -15,6 +15,7 @@ import (
 type fetchTransaction struct {
 	created   map[string]os.FileInfo
 	prefix    string
+	progress  *progressTracker
 	mu        sync.Mutex
 	remaining atomic.Int64
 }
@@ -49,9 +50,11 @@ func (f *Fetcher) FetchAll(ctx context.Context, artifacts []Artifact) (map[strin
 		digests[value.digest] = struct{}{}
 		parsed = append(parsed, value)
 	}
+	batchID := f.batchID.Add(1)
 	transaction := &fetchTransaction{
-		prefix:  "batch-" + strconv.FormatUint(f.batchID.Add(1), 10) + "-",
-		created: make(map[string]os.FileInfo),
+		prefix:   "batch-" + strconv.FormatUint(batchID, 10) + "-",
+		created:  make(map[string]os.FileInfo),
+		progress: newProgressTracker(f.progress, BatchID(batchID), len(parsed)),
 	}
 	transaction.remaining.Store(f.maxTotalBytes)
 	paths, err := f.runTransaction(ctx, parsed, transaction)

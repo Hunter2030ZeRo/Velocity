@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/Hunter2030ZeRo/velocity/internal/download"
 	"github.com/Hunter2030ZeRo/velocity/internal/platform"
 )
 
@@ -24,6 +25,7 @@ const (
 // Options contains reusable installation inputs and adapter configuration.
 type Options struct {
 	HTTPClient         *http.Client
+	Progress           download.ProgressFunc
 	Root               string
 	CacheDir           string
 	ResolverExecutable string

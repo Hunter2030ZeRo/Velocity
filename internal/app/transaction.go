@@ -91,6 +91,7 @@ func (transaction transaction) download(
 		MaxTotalBytes: maxDownloadBytes,
 		MaxArtifacts:  maxDownloadArtifacts,
 		Client:        transaction.options.HTTPClient,
+		Progress:      transaction.options.Progress,
 		AllowHTTP:     transaction.options.AllowHTTP,
 	})
 	if err != nil {

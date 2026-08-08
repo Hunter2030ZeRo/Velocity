@@ -46,6 +46,7 @@ func newInstallCommand(install InstallFunc) *cobra.Command {
 	var registryURL string
 	var jobs int
 	var targetRaw string
+	var progressRaw string
 
 	command := &cobra.Command{
 		Use:   "install <package>...",
@@ -54,6 +55,10 @@ func newInstallCommand(install InstallFunc) *cobra.Command {
 		RunE: func(command *cobra.Command, packages []string) error {
 			if jobs <= 0 {
 				return errors.New("jobs must be greater than zero")
+			}
+			mode, err := parseProgressMode(progressRaw)
+			if err != nil {
+				return err
 			}
 			options, err := defaultOptions()
 			if err != nil {
@@ -77,9 +82,19 @@ func newInstallCommand(install InstallFunc) *cobra.Command {
 					return fmt.Errorf("parse target: %w", err)
 				}
 			}
+			var progress *downloadProgress
+			if progressEnabled(mode, command.ErrOrStderr()) {
+				progress = newDownloadProgress(command.ErrOrStderr())
+				options.Progress = progress.Report
+			}
 			result, err := install(command.Context(), options)
+			progressErr := progress.Close()
 			if err != nil {
-				return fmt.Errorf("install packages: %w", err)
+				installErr := fmt.Errorf("install packages: %w", err)
+				return errors.Join(installErr, progressErr)
+			}
+			if progressErr != nil {
+				return progressErr
 			}
 			return renderResult(command, result)
 		},
@@ -91,6 +106,7 @@ func newInstallCommand(install InstallFunc) *cobra.Command {
 	flags.StringVar(&registryURL, "registry", registry.DefaultMetadataURL, "registry metadata URL")
 	flags.IntVar(&jobs, "jobs", defaultJobs, "parallel artifact downloads")
 	flags.StringVar(&targetRaw, "target", "", "registry target triple")
+	flags.StringVar(&progressRaw, "progress", "auto", "download progress: auto, always, or never")
 	return command
 }
 

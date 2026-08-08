@@ -40,6 +40,7 @@ var (
 // Config controls how a Fetcher stores and downloads artifacts.
 type Config struct {
 	Client        *http.Client
+	Progress      ProgressFunc
 	CacheDir      string
 	MaxBytes      int64
 	MaxTotalBytes int64
@@ -58,6 +59,7 @@ type Artifact struct {
 type Fetcher struct {
 	flights       singleflight.Group
 	client        *http.Client
+	progress      *progressDispatcher
 	cacheDir      string
 	maxBytes      int64
 	maxTotalBytes int64
@@ -100,6 +102,7 @@ func New(cfg Config) (*Fetcher, error) {
 		maxTotalBytes: maxTotalBytes,
 		maxArtifacts:  maxArtifacts,
 		client:        client,
+		progress:      newProgressDispatcher(cfg.Progress),
 		allowHTTP:     cfg.AllowHTTP,
 	}, nil
 }

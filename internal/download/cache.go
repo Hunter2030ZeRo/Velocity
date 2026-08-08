@@ -19,6 +19,7 @@ type cacheResult struct {
 
 type cacheWrite struct {
 	transaction *fetchTransaction
+	progress    *artifactProgress
 	source      io.Reader
 	artifact    parsedArtifact
 }
@@ -39,6 +40,9 @@ func (f *Fetcher) fetch(
 		return cacheResult{}, err
 	}
 	if cached {
+		if transaction != nil {
+			transaction.progress.completeCached()
+		}
 		return cacheResult{path: path}, nil
 	}
 	return f.download(ctx, artifact, transaction)
@@ -95,18 +99,24 @@ func (f *Fetcher) download(
 	if response == nil || response.Body == nil {
 		return cacheResult{}, errors.New("download: HTTP client returned an empty response")
 	}
+	var progress *artifactProgress
 	defer func() {
 		if closeErr := response.Body.Close(); closeErr != nil && err == nil {
 			err = fmt.Errorf("close download response: %w", closeErr)
 		}
+		progress.finish(err == nil)
 	}()
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		return cacheResult{}, fmt.Errorf("download %s returned HTTP %d", artifact.url, response.StatusCode)
+	}
+	if transaction != nil {
+		progress = transaction.progress.start(response.ContentLength)
 	}
 	return f.writeCache(ctx, cacheWrite{
 		source:      response.Body,
 		artifact:    artifact,
 		transaction: transaction,
+		progress:    progress,
 	})
 }
 
@@ -122,6 +132,9 @@ func (f *Fetcher) writeCache(ctx context.Context, write cacheWrite) (result cach
 	destination = io.MultiWriter(temp.file, hash)
 	if write.transaction != nil {
 		destination = &budgetWriter{remaining: &write.transaction.remaining, destination: destination}
+	}
+	if write.progress != nil {
+		destination = &progressWriter{destination: destination, artifact: write.progress}
 	}
 	written, err := io.Copy(
 		destination,
