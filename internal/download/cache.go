@@ -60,7 +60,7 @@ func (f *Fetcher) prepareCache(
 		return "", false, fmt.Errorf("create cache directory: %w", err)
 	}
 	if err := validateCacheDirectory(f.cacheDir); err != nil {
-		return "", false, err
+		return "", false, fmt.Errorf("validate cache directory %q: %w", f.cacheDir, err)
 	}
 	path := filepath.Join(f.cacheDir, artifact.digest)
 	valid, err := f.validCache(ctx, cacheValidation{

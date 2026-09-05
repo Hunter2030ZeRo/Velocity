@@ -141,8 +141,22 @@ func validateWindowsDACL(dacl *windows.ACL, owner *windows.SID, user *windows.SI
 		}
 		// ACCESS_ALLOWED_ACE stores its variable-length SID at SidStart by API contract.
 		sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart)) //nolint:gosec // Audited Win32 ACE layout.
+		// CREATOR OWNER is a placeholder, not another account. An inherit-only
+		// entry on a directory grants no access to that directory; Windows
+		// replaces the SID with the child's owner when creating an effective
+		// inherited ACE. Child cache entries still undergo owner/DACL checks.
+		// Do not skip arbitrary inherit-only ACEs: Everyone write would expose
+		// newly downloaded children before they are reused from the cache.
+		if directory && ace.Header.AceFlags&windows.INHERIT_ONLY_ACE != 0 &&
+			sid.IsValid() && sid.IsWellKnown(windows.WinCreatorOwnerSid) {
+			continue
+		}
 		if !windowsTrustedSID(sid, owner, user) {
-			return fmt.Errorf("cache DACL grants write access outside current user, owner, SYSTEM, or Administrators: %w", ErrUnsafeCache)
+			return fmt.Errorf(
+				"cache DACL grants write access outside current user, owner, SYSTEM, or Administrators "+
+					"(SID %s, mask %#x, flags %#x): %w",
+				sid, ace.Mask, ace.Header.AceFlags, ErrUnsafeCache,
+			)
 		}
 	}
 	return nil
