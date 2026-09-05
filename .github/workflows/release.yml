@@ -32,25 +32,17 @@ jobs:
             exit 1
           fi
 
-          if [ "$GITHUB_REF" = refs/heads/codex/publish-v0.1.2 ]; then
-            if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
-              echo "Tag $tag already exists" >&2
-              exit 1
-            fi
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            test "$(git rev-parse "refs/tags/$tag^{commit}")" = "609d7fbc2616a38a287d77ffbc3c7b23576480ed"
+          else
             git tag "$tag" "609d7fbc2616a38a287d77ffbc3c7b23576480ed"
             git push origin "refs/tags/$tag"
           fi
-
           if gh release view "$tag" >/dev/null 2>&1; then
-            echo "Release $tag already exists" >&2
-            exit 1
+            test "$(gh release view "$tag" --json isDraft --jq .isDraft)" = true
+          else
+            gh release create "$tag" --draft --verify-tag --title "$tag" --generate-notes
           fi
-
-          gh release create "$tag" \
-            --draft \
-            --verify-tag \
-            --title "$tag" \
-            --generate-notes
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
   build-linux:
@@ -209,7 +201,7 @@ jobs:
           $root = Join-Path $smokeParent 'installed'
           & ./dist/velocity.exe install jq --cache $cache --root $root --progress never
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & ./dist/velocity.exe install jq --cache $cache --root $root --progress never
+          & ./dist/velocity.exe install jq --cache $cache --root (Join-Path $smokeParent 'reused-install') --progress never
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & (Join-Path $root 'bin/jq.exe') --version
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
