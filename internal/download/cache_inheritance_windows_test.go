@@ -37,8 +37,16 @@ func TestWindowsCachePolicy_creator_owner_inheritance(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			dacl := windowsACL(t, windowsAccess(windowsAccessSpec{
-				test.sid, windows.GENERIC_ALL, windows.GRANT_ACCESS, test.flags,
+				test.sid, windows.GENERIC_ALL, windows.GRANT_ACCESS, test.flags &^ windows.INHERITED_ACE,
 			}))
+			// SetEntriesInAcl expects explicit entries and can discard entries
+			// marked inherited. Apply that provenance bit after construction.
+			var ace *windows.ACCESS_ALLOWED_ACE
+			mustNoError(t, windows.GetAce(dacl, 0, &ace))
+			if ace == nil {
+				t.Fatal("fixture ACL has no entry")
+			}
+			ace.Header.AceFlags |= byte(test.flags & windows.INHERITED_ACE)
 			err := validateWindowsPolicy(windowsPolicyInput{
 				owner: user, user: user, dacl: dacl, directory: test.directory,
 			})
