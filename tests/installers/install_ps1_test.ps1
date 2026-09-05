@@ -64,6 +64,46 @@ try {
     Assert-FileEquals -Expected (Join-Path $payload 'velocity-resolver.exe') `
         -Actual (Join-Path $installDir 'velocity-resolver.exe')
 
+    # Exercise irm URL | iex without a script file invocation. Only the network
+    # fetch is mocked; execution, checksums, extraction and publication are real.
+    $pipeInstall = Join-Path $testRoot 'pipe install'
+    $savedInstallerEnvironment = @{}
+    foreach ($name in @('VELOCITY_TARGET', 'VELOCITY_INSTALL_DIR', 'VELOCITY_RELEASE_BASE_URL', 'VELOCITY_VERSION')) {
+        $savedInstallerEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+    }
+    try {
+        $env:VELOCITY_TARGET = $target
+        $env:VELOCITY_INSTALL_DIR = $pipeInstall
+        $env:VELOCITY_RELEASE_BASE_URL = $release
+        $env:VELOCITY_VERSION = 'v1.2.3'
+        & {
+            function Invoke-RestMethod {
+                param([string] $Uri)
+                if ($Uri -cne 'https://raw.githubusercontent.com/Hunter2030ZeRo/Velocity/main/install.ps1') {
+                    throw "Unexpected installer URL: $Uri"
+                }
+                Get-Content -LiteralPath $installer -Raw
+            }
+            irm https://raw.githubusercontent.com/Hunter2030ZeRo/Velocity/main/install.ps1 | iex
+        }
+        Assert-FileEquals -Expected (Join-Path $payload 'velocity.exe') -Actual (Join-Path $pipeInstall 'velocity.exe')
+        Assert-FileEquals -Expected (Join-Path $payload 'velocity-resolver.exe') `
+            -Actual (Join-Path $pipeInstall 'velocity-resolver.exe')
+
+        # The downloaded scriptblock supports explicit arguments as documented.
+        $argumentInstall = Join-Path $testRoot 'scriptblock install'
+        & ([scriptblock]::Create((Get-Content -LiteralPath $installer -Raw))) `
+            -Version v1.2.3 -Target $target -InstallDir $argumentInstall -ReleaseBaseUrl $release
+        Assert-FileEquals -Expected (Join-Path $payload 'velocity.exe') -Actual (Join-Path $argumentInstall 'velocity.exe')
+        Assert-FileEquals -Expected (Join-Path $payload 'velocity-resolver.exe') `
+            -Actual (Join-Path $argumentInstall 'velocity-resolver.exe')
+    }
+    finally {
+        foreach ($name in $savedInstallerEnvironment.Keys) {
+            [Environment]::SetEnvironmentVariable($name, $savedInstallerEnvironment[$name], 'Process')
+        }
+    }
+
     # Given: a newer checksum-valid release for the same target.
     [IO.File]::WriteAllText((Join-Path $payload 'velocity.exe'), 'velocity upgraded')
     [IO.File]::WriteAllText((Join-Path $payload 'velocity-resolver.exe'), 'resolver upgraded')

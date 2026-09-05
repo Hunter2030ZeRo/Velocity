@@ -310,7 +310,10 @@ function Get-HostTarget {
     }
 }
 
-if ($MyInvocation.InvocationName -eq '.') { return }
+# Loading a file with dot-sourcing exposes helpers for tests. Invoke-Expression
+# also runs in the caller's scope, but must execute the installation itself.
+if ($MyInvocation.InvocationName -eq '.' -and
+    $MyInvocation.MyCommand -is [Management.Automation.ExternalScriptInfo]) { return }
 
 if ([string]::IsNullOrWhiteSpace($Version)) {
     $Version = if ($env:VELOCITY_VERSION) { $env:VELOCITY_VERSION } else { 'latest' }

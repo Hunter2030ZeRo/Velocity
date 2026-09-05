@@ -75,6 +75,34 @@ assert_file_equals "$payload/velocity-resolver" "$install_dir/velocity-resolver"
 [ "$("$install_dir/velocity")" = 'velocity fixture' ] || fail 'velocity did not run'
 [ "$("$install_dir/velocity-resolver")" = 'resolver fixture' ] || fail 'resolver did not run'
 
+# Exercise the same stdin path as curl -fsSL URL | sh, with no local script path.
+pipe_install=$test_root/pipe-install
+cat "$installer" | VELOCITY_RELEASE_BASE_URL=file://$release VELOCITY_TARGET=$target \
+	VELOCITY_INSTALL_DIR=$pipe_install sh >/dev/null
+assert_file_equals "$payload/velocity" "$pipe_install/velocity"
+assert_file_equals "$payload/velocity-resolver" "$pipe_install/velocity-resolver"
+
+# Explicit arguments also work with curl ... | sh -s -- ... .
+args_install=$test_root/args-install
+cat "$installer" | sh -s -- --base-url "file://$release" --version v1.2.3 \
+	--target "$target" --install-dir "$args_install" >/dev/null
+assert_file_equals "$payload/velocity" "$args_install/velocity"
+assert_file_equals "$payload/velocity-resolver" "$args_install/velocity-resolver"
+
+# A truncated response must not begin installation before the final invocation.
+partial_install=$test_root/partial-install
+sed '$d' "$installer" | VELOCITY_RELEASE_BASE_URL=file://$release VELOCITY_TARGET=$target \
+	VELOCITY_INSTALL_DIR=$partial_install sh >/dev/null
+[ ! -e "$partial_install" ] || fail 'truncated installer modified the destination'
+
+# The PATH reminder reflects the caller's PATH, not the private tool-search PATH.
+path_output=$test_root/path-output
+PATH=$pipe_install:$PATH VELOCITY_RELEASE_BASE_URL=file://$release \
+	sh "$installer" --target "$target" --install-dir "$pipe_install" >"$path_output"
+if grep -F 'Add ' "$path_output" >/dev/null; then
+	fail 'installer ignored the original PATH'
+fi
+
 # Given: a newer checksum-valid release for the same target.
 sed 's/velocity fixture/velocity upgraded/' "$payload/velocity" >"$test_root/velocity-upgraded"
 sed 's/resolver fixture/resolver upgraded/' "$payload/velocity-resolver" >"$test_root/resolver-upgraded"

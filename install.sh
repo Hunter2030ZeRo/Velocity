@@ -1,7 +1,10 @@
 #!/bin/sh
 
+# Parse the complete installer before doing any work when piped into sh.
+velocity_main() {
 set -eu
 umask 077
+velocity_original_path=${PATH:-}
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 LC_ALL=C; export PATH LC_ALL
 unset GZIP TAR_OPTIONS
@@ -270,7 +273,10 @@ fi
 velocity_publish_pending=0
 
 printf 'Installed Velocity (%s) to %s\n' "$velocity_target" "$velocity_install_dir"
-case :${PATH:-}: in
+case :$velocity_original_path: in
 *:$velocity_install_dir:*) ;;
 *) printf 'Add %s to PATH to run velocity.\n' "$velocity_install_dir" ;;
 esac
+}
+
+velocity_main "$@"

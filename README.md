@@ -50,7 +50,35 @@ Either path writes sibling executables to `bin/velocity` and `bin/velocity-resol
 
 ## Install
 
-Install the sibling CLI and resolver from GitHub Releases:
+Install the CLI and resolver together, without cloning the repository.
+
+Linux (POSIX shell):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Hunter2030ZeRo/Velocity/main/install.sh | sh
+```
+
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/Hunter2030ZeRo/Velocity/main/install.ps1 | iex
+```
+
+These commands install the latest **published** release. A draft release is not
+downloadable by an anonymous installer; publication must include `SHA256SUMS`.
+No administrator privileges are needed for the default per-user destinations.
+
+To select a version or destination while piping the script:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Hunter2030ZeRo/Velocity/main/install.sh | sh -s -- --version v0.1.0 --install-dir "$HOME/.local/bin"
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Hunter2030ZeRo/Velocity/main/install.ps1))) -Version v0.1.0
+```
+
+Alternatively, download either installer and run the file:
 
 ```sh
 sh install.sh
