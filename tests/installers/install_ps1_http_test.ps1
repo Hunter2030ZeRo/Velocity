@@ -13,7 +13,16 @@ try {
     }
 
     Add-Type -AssemblyName System.Net.Http
-    Add-Type -ReferencedAssemblies ([System.Net.Http.HttpMessageHandler].Assembly.Location) -TypeDefinition @'
+    # PowerShell 7 needs its reference assemblies when overriding the defaults;
+    # Windows PowerShell 5.1 instead uses the .NET Framework references.
+    $references = if ($PSVersionTable.PSEdition -eq 'Core') {
+        @(Get-ChildItem -LiteralPath (Join-Path $PSHOME 'ref') -Filter '*.dll' |
+            Select-Object -ExpandProperty FullName)
+    }
+    else {
+        @('System.dll', 'System.Core.dll', [System.Net.Http.HttpMessageHandler].Assembly.Location)
+    }
+    Add-Type -ReferencedAssemblies $references -TypeDefinition @'
 using System;
 using System.Collections.Generic;
 using System.Net;
