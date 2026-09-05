@@ -1,6 +1,7 @@
 #!/bin/sh
 
 set -eu
+export VELOCITY_NO_MODIFY_PATH=1
 
 fail() {
 	printf 'FAIL: %s\n' "$1" >&2

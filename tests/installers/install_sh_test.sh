@@ -1,6 +1,7 @@
 #!/bin/sh
 
 set -eu
+export VELOCITY_NO_MODIFY_PATH=1
 
 fail() {
 	printf 'FAIL: %s\n' "$1" >&2
@@ -102,6 +103,53 @@ PATH=$pipe_install:$PATH VELOCITY_RELEASE_BASE_URL=file://$release \
 if grep -F 'Add ' "$path_output" >/dev/null; then
 	fail 'installer ignored the original PATH'
 fi
+
+# Automatic PATH setup uses an isolated home, preserves content, quotes shell
+# metacharacters literally, and is idempotent both on disk and when sourced.
+path_home=$test_root/path-home
+mkdir -p "$path_home"
+printf '# existing config without final newline' >"$path_home/.bashrc"
+printf '# existing login profile\n' >"$path_home/.bash_profile"
+path_install="$test_root/space ' quote \$(touch INJECTED) [bin]"
+for attempt in 1 2; do
+	cat "$installer" | HOME="$path_home" SHELL=/bin/bash VELOCITY_NO_MODIFY_PATH=0 \
+		sh -s -- --target "$target" --base-url "file://$release" --install-dir "$path_install" >/dev/null
+done
+grep -Fqx '# existing config without final newline' "$path_home/.bashrc" || fail 'existing config lost'
+[ "$(grep -c '^case ' "$path_home/.bashrc")" -eq 1 ] || fail 'duplicate PATH configuration'
+[ ! -e "$path_home/.profile" ] || fail 'created shadowed login profile'
+for profile in .bashrc .bash_profile; do
+	result=$(PATH=/usr/bin:/bin sh -c '. "$1"; . "$1"; command -v velocity' sh "$path_home/$profile")
+	[ "$result" = "$path_install/velocity" ] || fail 'configured PATH did not resolve velocity'
+done
+[ ! -e INJECTED ] || fail 'PATH configuration executed directory content'
+
+# Honor ZDOTDIR and XDG_CONFIG_HOME rather than assuming default locations.
+HOME="$path_home" SHELL=/bin/zsh ZDOTDIR="$path_home/z dot" VELOCITY_NO_MODIFY_PATH=0 \
+	sh "$installer" --target "$target" --base-url "file://$release" --install-dir "$path_install" >/dev/null
+[ -f "$path_home/z dot/.zshrc" ] || fail 'ZDOTDIR ignored'
+HOME="$path_home" SHELL=/bin/fish XDG_CONFIG_HOME="$path_home/config" VELOCITY_NO_MODIFY_PATH=0 \
+	sh "$installer" --target "$target" --base-url "file://$release" --install-dir "$path_install" >/dev/null
+[ -f "$path_home/config/fish/conf.d/velocity-path.fish" ] || fail 'Fish configuration missing'
+if command -v fish >/dev/null; then
+	result=$(fish --no-config -c 'source "$argv[1]"; source "$argv[1]"; command -s velocity' "$path_home/config/fish/conf.d/velocity-path.fish")
+	[ "$result" = "$path_install/velocity" ] || fail 'Fish PATH did not resolve velocity'
+fi
+if command -v zsh >/dev/null; then
+	result=$(zsh -f -c '. "$1"; . "$1"; command -v velocity' zsh "$path_home/z dot/.zshrc")
+	[ "$result" = "$path_install/velocity" ] || fail 'Zsh PATH did not resolve velocity'
+fi
+
+# An explicit opt-out overrides the default without creating any profile.
+HOME="$path_home/opt-out" SHELL=/bin/bash VELOCITY_NO_MODIFY_PATH=0 \
+	sh "$installer" --target "$target" --base-url "file://$release" --install-dir "$pipe_install" --no-modify-path >/dev/null
+[ ! -e "$path_home/opt-out" ] || fail 'opt-out modified profiles'
+# A configuration failure must not roll back a successfully installed pair.
+mkdir -p "$path_home/blocked/.bashrc"
+HOME="$path_home/blocked" SHELL=/bin/bash VELOCITY_NO_MODIFY_PATH=0 \
+	sh "$installer" --target "$target" --base-url "file://$release" --install-dir "$pipe_install" >"$path_output" 2>&1
+grep -F 'automatic PATH configuration failed' "$path_output" >/dev/null || fail 'missing PATH failure warning'
+assert_file_equals "$payload/velocity" "$pipe_install/velocity"
 
 # Given: a newer checksum-valid release for the same target.
 sed 's/velocity fixture/velocity upgraded/' "$payload/velocity" >"$test_root/velocity-upgraded"

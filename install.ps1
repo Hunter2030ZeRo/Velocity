@@ -4,7 +4,8 @@ param(
     [string] $Target,
     [string] $InstallDir,
     [string] $ReleaseBaseUrl,
-    [string] $Repository
+    [string] $Repository,
+    [switch] $NoModifyPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -310,6 +311,67 @@ function Get-HostTarget {
     }
 }
 
+function Test-PathEntry {
+    param([AllowNull()] [string] $Value, [string] $Directory)
+    foreach ($entry in @($Value -split ';')) {
+        $expanded = [Environment]::ExpandEnvironmentVariables($entry.Trim().Trim('"')).TrimEnd('\', '/')
+        if ([string]::Equals($expanded, $Directory.TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+    }
+    return $false
+}
+
+function Add-VelocityToPath {
+    param([Parameter(Mandatory)] [string] $Directory)
+    if ($Directory.IndexOfAny([char[]] ";`r`n") -ge 0) {
+        throw 'The installation directory cannot be represented as a PATH entry'
+    }
+    # Read without expanding existing %VARIABLE% entries, and never copy the
+    # combined process/system PATH into the per-user registry value.
+    $key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
+    $userPath = ''
+    try {
+        $kind = [Microsoft.Win32.RegistryValueKind]::ExpandString
+        if ($key.GetValueNames() -contains 'Path') {
+            $kind = $key.GetValueKind('Path')
+            if ($kind -notin @([Microsoft.Win32.RegistryValueKind]::String, [Microsoft.Win32.RegistryValueKind]::ExpandString)) {
+                throw 'Existing user PATH is not a string registry value'
+            }
+        }
+        $userPath = [string] $key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+        if (-not (Test-PathEntry -Value $userPath -Directory $Directory)) {
+            $newPath = if ([string]::IsNullOrEmpty($userPath)) { $Directory } else { "$($userPath.TrimEnd(';'));$Directory" }
+            $key.SetValue('Path', $newPath, $kind)
+        }
+    }
+    finally { $key.Dispose() }
+    if (-not (Test-PathEntry -Value $env:PATH -Directory $Directory)) {
+        $env:PATH = if ([string]::IsNullOrEmpty($env:PATH)) { $Directory } else { "$($env:PATH.TrimEnd(';'));$Directory" }
+    }
+    # Let Explorer and other launchers refresh their environment for new shells.
+    try {
+        if (-not ('VelocityInstaller.EnvironmentNotification' -as [type])) {
+            Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+namespace VelocityInstaller {
+    public static class EnvironmentNotification {
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        public static extern IntPtr SendMessageTimeoutW(IntPtr window, uint message,
+            UIntPtr wParam, string lParam, uint flags, uint timeout, out UIntPtr result);
+    }
+}
+'@
+        }
+        $result = [UIntPtr]::Zero
+        [void] [VelocityInstaller.EnvironmentNotification]::SendMessageTimeoutW(
+            [IntPtr] 0xffff, 0x1a, [UIntPtr]::Zero, 'Environment', 2, 1000, [ref] $result)
+    }
+    catch { Write-Warning 'PATH is saved. Restart your terminal application if new windows do not see it.' }
+    Write-Output 'Configured user PATH and the current PowerShell session.'
+}
+
 # Loading a file with dot-sourcing exposes helpers for tests. Invoke-Expression
 # also runs in the caller's scope, but must execute the installation itself.
 if ($MyInvocation.InvocationName -eq '.' -and
@@ -456,8 +518,11 @@ try {
     }
 
     Write-Output "Installed Velocity ($Target) to $InstallDir"
-    $pathEntries = @($env:PATH -split [IO.Path]::PathSeparator)
-    if (-not ($pathEntries -contains $InstallDir)) {
+    if (-not $NoModifyPath -and $env:VELOCITY_NO_MODIFY_PATH -ne '1') {
+        try { Add-VelocityToPath -Directory $InstallDir }
+        catch { Write-Warning "Velocity is installed, but automatic PATH configuration failed: $($_.Exception.Message). Add $InstallDir to PATH manually." }
+    }
+    elseif (-not (Test-PathEntry -Value $env:PATH -Directory $InstallDir)) {
         Write-Warning "Add $InstallDir to PATH to run velocity."
     }
 }

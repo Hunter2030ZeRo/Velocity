@@ -7,6 +7,8 @@ $testRoot = Join-Path ([IO.Path]::GetTempPath()) ("velocity-recovery-{0}" -f [Gu
 $target = 'x86_64-pc-windows-msvc'
 $asset = "velocity-$target.zip"
 $originalOS = $env:OS
+$originalNoModifyPath = $env:VELOCITY_NO_MODIFY_PATH
+$env:VELOCITY_NO_MODIFY_PATH = '1'
 
 try {
     $env:OS = 'Windows_NT'
@@ -85,6 +87,7 @@ try {
     Write-Output 'install.ps1 recovery tests passed'
 }
 finally {
+    $env:VELOCITY_NO_MODIFY_PATH = $originalNoModifyPath
     if ($null -eq $originalOS) { Remove-Item Env:OS -ErrorAction SilentlyContinue }
     else { $env:OS = $originalOS }
     Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue

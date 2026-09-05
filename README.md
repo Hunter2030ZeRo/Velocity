@@ -98,8 +98,21 @@ defaults to `$HOME/.local/bin`. The PowerShell installer supports x86-64 and
 AArch64 Windows MSVC on Windows PowerShell 5.1 or PowerShell 7 and defaults to
 `%LOCALAPPDATA%\velocity\bin`. Pass
 `--target`/`-Target` for an explicit target and `--install-dir`/`-InstallDir`
-for another destination. Neither script modifies shell profiles or persistent
-`PATH`; it prints a reminder when the destination is not already available.
+for another destination. After successful installation, the scripts automatically
+add that directory to your user PATH without duplicate entries:
+
+- Windows: saves the user PATH and updates the current PowerShell process, so
+  `velocity` works immediately when installed with `irm ... | iex`.
+- Linux Bash: updates `.bashrc` and the active login profile (`.bash_profile`,
+  `.bash_login`, or `.profile`). Zsh uses `${ZDOTDIR:-$HOME}/.zshrc`; Fish uses
+  `${XDG_CONFIG_HOME:-$HOME/.config}/fish/conf.d/velocity-path.fish`. Other shells
+  use `.profile`. Open a new terminal afterward: a piped `sh` process cannot
+  change its parent shell's environment.
+
+Existing configuration is preserved. To opt out, pass `--no-modify-path` or
+`-NoModifyPath`, or set `VELOCITY_NO_MODIFY_PATH=1` before installation. If PATH
+configuration fails, the verified executables remain installed and the installer
+prints a manual setup warning.
 
 Each release must publish `SHA256SUMS` and one stable archive per target:
 
