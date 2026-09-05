@@ -5,7 +5,8 @@ param(
     [string] $InstallDir,
     [string] $ReleaseBaseUrl,
     [string] $Repository,
-    [switch] $NoModifyPath
+    [switch] $NoModifyPath,
+    [switch] $PathOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -413,6 +414,18 @@ if ($Target -notin @('x86_64-pc-windows-msvc', 'aarch64-pc-windows-msvc')) {
 $InstallDir = [IO.Path]::GetFullPath($InstallDir)
 if ($InstallDir -eq [IO.Path]::GetPathRoot($InstallDir)) {
     throw 'Refusing to install directly into a filesystem root'
+}
+if ($PathOnly) {
+    if ($NoModifyPath) { throw '-PathOnly cannot be combined with -NoModifyPath' }
+    $installItem = Get-Item -LiteralPath $InstallDir -Force
+    if (-not $installItem.PSIsContainer -or ($installItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw "Installation directory must be a non-reparse directory: $InstallDir"
+    }
+    # Explicit PATH repair overrides the automatic-installation opt-out.
+    # Invoke this scriptblock in the current PowerShell to update that session.
+    Add-VelocityToPath -Directory $InstallDir
+    Write-Output "Package command directory: $InstallDir"
+    return
 }
 if ([string]::IsNullOrWhiteSpace($ReleaseBaseUrl)) {
     $ReleaseBaseUrl = if ($Version -eq 'latest') {
