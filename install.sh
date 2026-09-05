@@ -15,6 +15,8 @@ velocity_target=${VELOCITY_TARGET:-}
 velocity_install_dir=${VELOCITY_INSTALL_DIR:-}
 velocity_release_base=${VELOCITY_RELEASE_BASE_URL:-}
 velocity_no_modify_path=${VELOCITY_NO_MODIFY_PATH:-0}
+velocity_path_only=0
+velocity_explicit_no_path=0
 velocity_temp_dir=
 velocity_stage_dir=
 velocity_lock_dir='' velocity_lock_token=''
@@ -30,6 +32,7 @@ Usage: install.sh [options]
   --install-dir PATH     defaults to $HOME/.local/bin
   --base-url URL         HTTPS release directory or file:///absolute/path
   --no-modify-path       do not update shell startup files
+  --path-only            repair PATH for the existing bin directory; no downloads
 Set VELOCITY_NO_MODIFY_PATH=1 to disable automatic PATH configuration.
 Environment: VELOCITY_VERSION, VELOCITY_TARGET, VELOCITY_INSTALL_DIR, VELOCITY_RELEASE_BASE_URL, VELOCITY_REPOSITORY.
 EOF
@@ -169,7 +172,8 @@ while [ "$#" -gt 0 ]; do
 	--target) [ "$#" -ge 2 ] || fail '--target requires a value'; velocity_target=$2; shift 2 ;;
 	--install-dir) [ "$#" -ge 2 ] || fail '--install-dir requires a value'; velocity_install_dir=$2; shift 2 ;;
 	--base-url) [ "$#" -ge 2 ] || fail '--base-url requires a value'; velocity_release_base=$2; shift 2 ;;
-	--no-modify-path) velocity_no_modify_path=1; shift ;;
+	--no-modify-path) velocity_no_modify_path=1; velocity_explicit_no_path=1; shift ;;
+	--path-only) velocity_path_only=1; shift ;;
 	-h | --help) usage; exit 0 ;;
 	*) fail "unknown option: $1" ;;
 	esac
@@ -200,6 +204,14 @@ fi
 [ -n "$velocity_install_dir" ] || fail 'installation directory is empty'
 if [ -e "$velocity_install_dir" ] || [ -L "$velocity_install_dir" ]; then
 	canonicalize_install_dir
+fi
+
+if [ "$velocity_path_only" -eq 1 ]; then
+	[ "$velocity_explicit_no_path" -eq 0 ] || fail '--path-only cannot be combined with --no-modify-path'
+	canonicalize_install_dir
+	configure_path || fail 'could not configure PATH'
+	printf 'Package command directory: %s\n' "$velocity_install_dir"
+	return
 fi
 
 if [ -z "$velocity_release_base" ]; then

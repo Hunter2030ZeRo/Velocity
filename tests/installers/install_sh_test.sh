@@ -151,6 +151,24 @@ HOME="$path_home/blocked" SHELL=/bin/bash VELOCITY_NO_MODIFY_PATH=0 \
 grep -F 'automatic PATH configuration failed' "$path_output" >/dev/null || fail 'missing PATH failure warning'
 assert_file_equals "$payload/velocity" "$pipe_install/velocity"
 
+# PATH-only repair needs no release files and does not replace existing binaries.
+repair_home=$test_root/repair-home
+for attempt in 1 2; do
+	cat "$installer" | HOME="$repair_home" SHELL=/bin/bash VELOCITY_NO_MODIFY_PATH=1 \
+		sh -s -- --path-only --install-dir "$path_install" --base-url "file://$test_root/missing-release" >/dev/null
+done
+assert_file_equals "$payload/velocity" "$path_install/velocity"
+[ "$(grep -c '^case ' "$repair_home/.bashrc")" -eq 1 ] || fail 'PATH repair duplicated startup configuration'
+result=$(PATH=/usr/bin:/bin sh -c '. "$1"; velocity' sh "$repair_home/.bashrc")
+[ "$result" = 'velocity fixture' ] || fail 'repaired PATH could not execute installed command'
+if HOME="$repair_home" sh "$installer" --path-only --no-modify-path --install-dir "$path_install" >/dev/null 2>&1; then
+	fail 'conflicting PATH options were accepted'
+fi
+if HOME="$repair_home" sh "$installer" --path-only --install-dir "$test_root/missing-bin" >/dev/null 2>&1; then
+	fail 'PATH repair accepted missing directory'
+fi
+[ ! -e "$test_root/missing-bin" ] || fail 'PATH repair created a directory'
+
 # Given: a newer checksum-valid release for the same target.
 sed 's/velocity fixture/velocity upgraded/' "$payload/velocity" >"$test_root/velocity-upgraded"
 sed 's/resolver fixture/resolver upgraded/' "$payload/velocity-resolver" >"$test_root/resolver-upgraded"

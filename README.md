@@ -114,6 +114,30 @@ Existing configuration is preserved. To opt out, pass `--no-modify-path` or
 configuration fails, the verified executables remain installed and the installer
 prints a manual setup warning.
 
+All packages installed into the default root share one command directory:
+Windows uses `%LOCALAPPDATA%\velocity\bin` (normally
+`%USERPROFILE%\AppData\Local\velocity\bin`), and Linux uses `$HOME/.local/bin`.
+Adding this directory once exposes all package commands; individual executables
+do not need separate PATH entries.
+
+If packages are installed but the shell cannot find them, repair PATH without
+downloading or reinstalling any binaries:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Hunter2030ZeRo/Velocity/main/install.ps1))) -PathOnly
+```
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Hunter2030ZeRo/Velocity/main/install.sh | sh -s -- --path-only
+```
+
+PowerShell updates both persistent user PATH and the current session. Linux
+updates shell startup files; open a new terminal afterward. With a custom
+`velocity install --root ROOT`, pass `-InstallDir ROOT\bin` or
+`--install-dir ROOT/bin`. The directory must already exist. An explicit PATH
+repair overrides `VELOCITY_NO_MODIFY_PATH=1`; combining it with the explicit
+`-NoModifyPath`/`--no-modify-path` switch is an error.
+
 Each release must publish `SHA256SUMS` and one stable archive per target:
 
 ```text

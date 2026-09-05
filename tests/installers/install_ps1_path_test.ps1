@@ -53,6 +53,35 @@ try {
     if (-not (Test-Path -LiteralPath "$optOut/velocity.exe")) { throw 'Opt-out prevented installation' }
     if ([string] $key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames) -cne $actualUser) { throw 'Opt-out changed user PATH' }
     if ($env:PATH -cne "$($beforeProcess.TrimEnd(';'));$directory") { throw 'Opt-out changed process PATH' }
+    # PATH-only repair must expose package commands in the current shell even
+    # when all release sources are unavailable and auto-registration is disabled.
+    $packageCommand = Join-Path $directory 'velocity-path-package-test.cmd'
+    [IO.File]::WriteAllText($packageCommand, "@echo package fixture`r`n")
+    $beforeBinary = (Get-FileHash -LiteralPath "$directory/velocity.exe").Hash
+    $key.SetValue('Path', '%SystemRoot%\TestExisting', [Microsoft.Win32.RegistryValueKind]::ExpandString)
+    $env:PATH = $beforeProcess
+    $env:VELOCITY_NO_MODIFY_PATH = '1'
+    foreach ($attempt in 1..2) {
+        & ([scriptblock]::Create((Get-Content -LiteralPath $installer -Raw))) `
+            -PathOnly -InstallDir $directory -ReleaseBaseUrl "$testRoot/missing-release"
+    }
+    if ((Get-Command velocity-path-package-test.cmd -CommandType Application).Source -ne $packageCommand) {
+        throw 'Package command was not exposed by PATH repair'
+    }
+    if ((& velocity-path-package-test.cmd) -ne 'package fixture') { throw 'Package command did not run' }
+    if ((Get-FileHash -LiteralPath "$directory/velocity.exe").Hash -ne $beforeBinary) { throw 'PATH repair modified a binary' }
+    if ($env:PATH -cne "$($beforeProcess.TrimEnd(';'));$directory") { throw 'PATH repair duplicated process PATH' }
+    if ([string] $key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames) -cne $actualUser) {
+        throw 'PATH repair duplicated user PATH'
+    }
+    $conflictRejected = $false
+    try { & $installer -PathOnly -NoModifyPath -InstallDir $directory }
+    catch { $conflictRejected = $true }
+    if (-not $conflictRejected) { throw 'Conflicting PATH flags were accepted' }
+    $missingRejected = $false
+    try { & $installer -PathOnly -InstallDir "$testRoot/missing-bin" }
+    catch { $missingRejected = $true }
+    if (-not $missingRejected -or (Test-Path -LiteralPath "$testRoot/missing-bin")) { throw 'PATH repair created a missing destination' }
     Write-Output 'install.ps1 PATH tests passed'
 }
 finally {
