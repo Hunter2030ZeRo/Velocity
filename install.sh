@@ -14,6 +14,7 @@ velocity_version=${VELOCITY_VERSION:-latest}
 velocity_target=${VELOCITY_TARGET:-}
 velocity_install_dir=${VELOCITY_INSTALL_DIR:-}
 velocity_release_base=${VELOCITY_RELEASE_BASE_URL:-}
+velocity_no_modify_path=${VELOCITY_NO_MODIFY_PATH:-0}
 velocity_temp_dir=
 velocity_stage_dir=
 velocity_lock_dir='' velocity_lock_token=''
@@ -28,6 +29,8 @@ Usage: install.sh [options]
   --target TARGET        supported Linux target triple
   --install-dir PATH     defaults to $HOME/.local/bin
   --base-url URL         HTTPS release directory or file:///absolute/path
+  --no-modify-path       do not update shell startup files
+Set VELOCITY_NO_MODIFY_PATH=1 to disable automatic PATH configuration.
 Environment: VELOCITY_VERSION, VELOCITY_TARGET, VELOCITY_INSTALL_DIR, VELOCITY_RELEASE_BASE_URL, VELOCITY_REPOSITORY.
 EOF
 }
@@ -98,6 +101,43 @@ detect_target() {
 	esac
 }
 
+append_path_config() {
+	velocity_profile=$1
+	# Preserve existing content, including dotfile symlinks, and append only once.
+	if [ -e "$velocity_profile" ] && [ ! -f "$velocity_profile" ]; then return 1; fi
+	if [ -f "$velocity_profile" ] && grep -Fqx -- "$velocity_path_line" "$velocity_profile"; then return 0; fi
+	mkdir -p -- "$(dirname -- "$velocity_profile")" || return 1
+	printf '\n# Velocity installer: make the installed commands available.\n%s\n' "$velocity_path_line" >>"$velocity_profile" || return 1
+	printf 'Configured PATH in %s\n' "$velocity_profile"
+}
+
+configure_path() {
+	[ -n "${HOME:-}" ] || return 1
+	# A colon cannot be represented as a single POSIX PATH entry.
+	case $velocity_install_dir in *:* | *'
+'*) return 1 ;; esac
+	velocity_quoted_dir=$(printf '%s' "$velocity_install_dir" | sed "s/'/'\\\\''/g")
+	velocity_path_line="case \":\$PATH:\" in *:'$velocity_quoted_dir':*) ;; *) export PATH='$velocity_quoted_dir':\"\$PATH\" ;; esac"
+	velocity_shell=${SHELL:-sh}
+	case ${velocity_shell##*/} in
+	bash)
+		append_path_config "$HOME/.bashrc" || return 1
+		if [ -f "$HOME/.bash_profile" ]; then velocity_login_profile=$HOME/.bash_profile
+		elif [ -f "$HOME/.bash_login" ]; then velocity_login_profile=$HOME/.bash_login
+		else velocity_login_profile=$HOME/.profile; fi
+		append_path_config "$velocity_login_profile" || return 1
+		;;
+	zsh) append_path_config "${ZDOTDIR:-$HOME}/.zshrc" || return 1 ;;
+	fish)
+		velocity_quoted_dir=$(printf '%s' "$velocity_install_dir" | sed "s/\\\\/\\\\\\\\/g; s/'/\\\\'/g")
+		velocity_path_line="contains -- '$velocity_quoted_dir' \$PATH; or set -gx PATH '$velocity_quoted_dir' \$PATH"
+		append_path_config "${XDG_CONFIG_HOME:-$HOME/.config}/fish/conf.d/velocity-path.fish" || return 1
+		;;
+	*) append_path_config "$HOME/.profile" || return 1 ;;
+	esac
+	printf 'PATH is configured for new shells. Open a new terminal to run velocity.\n'
+}
+
 download_file() {
 	velocity_download_url=$1
 	velocity_download_destination=$2
@@ -129,6 +169,7 @@ while [ "$#" -gt 0 ]; do
 	--target) [ "$#" -ge 2 ] || fail '--target requires a value'; velocity_target=$2; shift 2 ;;
 	--install-dir) [ "$#" -ge 2 ] || fail '--install-dir requires a value'; velocity_install_dir=$2; shift 2 ;;
 	--base-url) [ "$#" -ge 2 ] || fail '--base-url requires a value'; velocity_release_base=$2; shift 2 ;;
+	--no-modify-path) velocity_no_modify_path=1; shift ;;
 	-h | --help) usage; exit 0 ;;
 	*) fail "unknown option: $1" ;;
 	esac
@@ -273,10 +314,16 @@ fi
 velocity_publish_pending=0
 
 printf 'Installed Velocity (%s) to %s\n' "$velocity_target" "$velocity_install_dir"
-case :$velocity_original_path: in
-*:$velocity_install_dir:*) ;;
-*) printf 'Add %s to PATH to run velocity.\n' "$velocity_install_dir" ;;
-esac
+if [ "$velocity_no_modify_path" != 1 ]; then
+	if ! configure_path; then
+		printf 'Velocity is installed, but automatic PATH configuration failed. Add %s to PATH manually.\n' "$velocity_install_dir" >&2
+	fi
+else
+	case :$velocity_original_path: in
+	*:"$velocity_install_dir":*) ;;
+	*) printf 'Add %s to PATH to run velocity.\n' "$velocity_install_dir" ;;
+	esac
+fi
 }
 
 velocity_main "$@"
