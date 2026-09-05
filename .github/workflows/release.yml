@@ -4,7 +4,7 @@ on:
   push:
     # One-time publication of the approved installer release.
     branches:
-      - 'codex/publish-v0.1.1'
+      - 'codex/publish-v0.1.2'
 
 permissions:
   contents: write
@@ -23,7 +23,7 @@ jobs:
         id: release
         env:
           GH_TOKEN: ${{ github.token }}
-          REQUESTED_TAG: v0.1.1
+          REQUESTED_TAG: v0.1.2
         run: |
           set -euo pipefail
           tag="$REQUESTED_TAG"
@@ -32,12 +32,12 @@ jobs:
             exit 1
           fi
 
-          if [ "$GITHUB_REF" = refs/heads/codex/publish-v0.1.1 ]; then
+          if [ "$GITHUB_REF" = refs/heads/codex/publish-v0.1.2 ]; then
             if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
               echo "Tag $tag already exists" >&2
               exit 1
             fi
-            git tag "$tag" "$GITHUB_SHA"
+            git tag "$tag" "609d7fbc2616a38a287d77ffbc3c7b23576480ed"
             git push origin "refs/tags/$tag"
           fi
 
@@ -194,6 +194,25 @@ jobs:
           if (-not (Test-Path -LiteralPath $asset) -or (Get-Item -LiteralPath $asset).Length -eq 0) {
             throw "Archive was not created: $asset"
           }
+
+
+      - name: Verify real registry installation with inherited cache ACL
+        shell: pwsh
+        run: |
+          $smokeParent = Join-Path $env:RUNNER_TEMP 'velocity-cache-smoke'
+          New-Item -ItemType Directory -Path $smokeParent -Force | Out-Null
+          $userSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          $acl = [Security.AccessControl.DirectorySecurity]::new()
+          $acl.SetSecurityDescriptorSddlForm("D:P(A;OICI;FA;;;$userSid)(A;OICIIO;FA;;;CO)")
+          Set-Acl -LiteralPath $smokeParent -AclObject $acl
+          $cache = Join-Path $smokeParent 'cache'
+          $root = Join-Path $smokeParent 'installed'
+          & ./dist/velocity.exe install jq --cache $cache --root $root --progress never
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & ./dist/velocity.exe install jq --cache $cache --root $root --progress never
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & (Join-Path $root 'bin/jq.exe') --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload Windows archive
         shell: pwsh
