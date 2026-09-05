@@ -2,14 +2,9 @@ name: release
 
 on:
   push:
-    tags:
-      - 'v*'
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: Release tag, for example v0.1.0
-        required: true
-        type: string
+    # One-time publication of the approved installer release.
+    branches:
+      - 'codex/publish-v0.1.1'
 
 permissions:
   contents: write
@@ -28,7 +23,7 @@ jobs:
         id: release
         env:
           GH_TOKEN: ${{ github.token }}
-          REQUESTED_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          REQUESTED_TAG: v0.1.1
         run: |
           set -euo pipefail
           tag="$REQUESTED_TAG"
@@ -37,7 +32,7 @@ jobs:
             exit 1
           fi
 
-          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+          if [ "$GITHUB_REF" = refs/heads/codex/publish-v0.1.1 ]; then
             if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
               echo "Tag $tag already exists" >&2
               exit 1
